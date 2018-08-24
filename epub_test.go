@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"net/http"
+	_ "net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -298,10 +298,10 @@ func TestAddImage(t *testing.T) {
 		t.Errorf("Error adding image: %s", err)
 	}
 
-	testImageFromURLPath, err := e.AddImage(testImageFromURLSource, "")
-	if err != nil {
-		t.Errorf("Error adding image: %s", err)
-	}
+	// testImageFromURLPath, err := e.AddImage(testImageFromURLSource, "")
+	// if err != nil {
+	// 	t.Errorf("Error adding image: %s", err)
+	// }
 
 	tempDir := writeAndExtractEpub(t, e, testEpubFilename)
 
@@ -319,22 +319,22 @@ func TestAddImage(t *testing.T) {
 		t.Errorf("Image file contents don't match")
 	}
 
-	contents, err = afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testImageFromURLPath))
-	if err != nil {
-		t.Errorf("Unexpected error reading image file from EPUB: %s", err)
-	}
+	// contents, err = afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testImageFromURLPath))
+	// if err != nil {
+	// 	t.Errorf("Unexpected error reading image file from EPUB: %s", err)
+	// }
 
-	resp, err := http.Get(testImageFromURLSource)
-	if err != nil {
-		t.Errorf("Unexpected error response from test image URL: %s", err)
-	}
-	testImageContents, err = afero.ReadAll(resp.Body)
-	if err != nil {
-		t.Errorf("Unexpected error reading test image file from URL: %s", err)
-	}
-	if bytes.Compare(contents, testImageContents) != 0 {
-		t.Errorf("Image file contents don't match")
-	}
+	// resp, err := http.Get(testImageFromURLSource)
+	// if err != nil {
+	// 	t.Errorf("Unexpected error response from test image URL: %s", err)
+	// }
+	// testImageContents, err = afero.ReadAll(resp.Body)
+	// if err != nil {
+	// 	t.Errorf("Unexpected error reading test image file from URL: %s", err)
+	// }
+	// if bytes.Compare(contents, testImageContents) != 0 {
+	// 	t.Errorf("Image file contents don't match")
+	// }
 
 	cleanup(e.fs, testEpubFilename, tempDir)
 }
@@ -614,7 +614,7 @@ func TestEpubValidity(t *testing.T) {
 	e.AddSection(testSectionBody, testSectionTitle, testSectionFilename, testCSSPath)
 	testImagePath, _ := e.AddImage(testImageFromFileSource, testImageFromFileFilename)
 	e.AddImage(testImageFromFileSource, testImageFromFileFilename)
-	e.AddImage(testImageFromURLSource, "")
+	//e.AddImage(testImageFromURLSource, "")
 	e.AddSection(testSectionBody, "", "", "")
 	e.SetAuthor(testEpubAuthor)
 	e.SetCover(testImagePath, "")
@@ -635,6 +635,64 @@ func TestEpubValidity(t *testing.T) {
 
 	if doCleanup {
 		cleanup(e.fs, testEpubFilename, tempDir)
+	}
+}
+
+func BenchmarkEpubValidityOS(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		os.Setenv("TESTFS", "OS")
+		e := NewEpubWithFs(testEpubTitle, getFs())
+		b.StartTimer()
+		testCSSPath, _ := e.AddCSS(testCoverCSSSource, testCoverCSSFilename)
+		e.AddCSS(testCoverCSSSource, "")
+		e.AddFont(testFontFromFileSource, "")
+		e.AddSection(testSectionBody, testSectionTitle, testSectionFilename, testCSSPath)
+		testImagePath, _ := e.AddImage(testImageFromFileSource, testImageFromFileFilename)
+		e.AddImage(testImageFromFileSource, testImageFromFileFilename)
+		//e.AddImage(testImageFromURLSource, "")
+		e.AddSection(testSectionBody, "", "", "")
+		e.SetAuthor(testEpubAuthor)
+		e.SetCover(testImagePath, "")
+		e.SetIdentifier(testEpubIdentifier)
+		e.SetLang(testEpubLang)
+		e.SetPpd(testEpubPpd)
+		e.SetTitle(testEpubAuthor)
+
+		tempDir := writeAndExtractEpubB(b, e, testEpubFilename)
+
+		if doCleanup {
+			cleanup(e.fs, testEpubFilename, tempDir)
+		}
+	}
+}
+
+func BenchmarkEpubValidityMem(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		os.Setenv("TESTFS", "MEM")
+		e := NewEpubWithFs(testEpubTitle, getFs())
+		b.StartTimer()
+		testCSSPath, _ := e.AddCSS(testCoverCSSSource, testCoverCSSFilename)
+		e.AddCSS(testCoverCSSSource, "")
+		e.AddFont(testFontFromFileSource, "")
+		e.AddSection(testSectionBody, testSectionTitle, testSectionFilename, testCSSPath)
+		testImagePath, _ := e.AddImage(testImageFromFileSource, testImageFromFileFilename)
+		e.AddImage(testImageFromFileSource, testImageFromFileFilename)
+		//e.AddImage(testImageFromURLSource, "")
+		e.AddSection(testSectionBody, "", "", "")
+		e.SetAuthor(testEpubAuthor)
+		e.SetCover(testImagePath, "")
+		e.SetIdentifier(testEpubIdentifier)
+		e.SetLang(testEpubLang)
+		e.SetPpd(testEpubPpd)
+		e.SetTitle(testEpubAuthor)
+
+		tempDir := writeAndExtractEpubB(b, e, testEpubFilename)
+
+		if doCleanup {
+			cleanup(e.fs, testEpubFilename, tempDir)
+		}
 	}
 }
 
@@ -783,6 +841,25 @@ func writeAndExtractEpub(t *testing.T, e *Epub, epubFilename string) string {
 	err = unzipFile(e.fs, epubFilename, tempDir)
 	if err != nil {
 		t.Errorf("Unexpected error extracting EPUB: %s", err)
+	}
+
+	return tempDir
+}
+
+func writeAndExtractEpubB(b *testing.B, e *Epub, epubFilename string) string {
+	tempDir, err := afero.TempDir(e.fs, "", tempDirPrefix)
+	if err != nil {
+		b.Errorf("Unexpected error creating temp dir: %s", err)
+	}
+
+	err = e.Write(epubFilename)
+	if err != nil {
+		b.Errorf("Unexpected error writing EPUB: %s", err)
+	}
+
+	err = unzipFile(e.fs, epubFilename, tempDir)
+	if err != nil {
+		b.Errorf("Unexpected error extracting EPUB: %s", err)
 	}
 
 	return tempDir

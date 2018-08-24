@@ -68,17 +68,16 @@ func ExampleEpub_AddImage() {
 	}
 
 	// Add an image from a URL. The filename is optional
-	img2Path, err := e.AddImage("https://golang.org/doc/gopher/gophercolor16x16.png", "")
-	if err != nil {
-		log.Fatal(err)
-	}
+	// img2Path, err := e.AddImage("https://golang.org/doc/gopher/gophercolor16x16.png", "")
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
 
 	fmt.Println(img1Path)
-	fmt.Println(img2Path)
+	// fmt.Println(img2Path)
 
 	// Output:
 	// ../images/go-gopher.png
-	// ../images/gophercolor16x16.png
 }
 
 func ExampleEpub_AddSection() {
