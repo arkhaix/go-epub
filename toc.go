@@ -3,9 +3,10 @@ package epub
 import (
 	"encoding/xml"
 	"fmt"
-	"io/ioutil"
 	"path/filepath"
 	"strconv"
+
+	"github.com/spf13/afero"
 )
 
 const (
@@ -176,13 +177,13 @@ func (t *toc) setTitle(title string) {
 }
 
 // Write the TOC files
-func (t *toc) write(tempDir string) {
-	t.writeNavDoc(tempDir)
-	t.writeNcxDoc(tempDir)
+func (t *toc) write(fs afero.Fs, tempDir string) {
+	t.writeNavDoc(fs, tempDir)
+	t.writeNcxDoc(fs, tempDir)
 }
 
 // Write the the EPUB v3 TOC file (nav.xhtml) to the temporary directory
-func (t *toc) writeNavDoc(tempDir string) {
+func (t *toc) writeNavDoc(fs afero.Fs, tempDir string) {
 	navBodyContent, err := xml.MarshalIndent(t.navXML, "    ", "  ")
 	if err != nil {
 		panic(fmt.Sprintf(
@@ -197,11 +198,11 @@ func (t *toc) writeNavDoc(tempDir string) {
 	n.setTitle(t.title)
 
 	navFilePath := filepath.Join(tempDir, contentFolderName, tocNavFilename)
-	n.write(navFilePath)
+	n.write(fs, navFilePath)
 }
 
 // Write the EPUB v2 TOC file (toc.ncx) to the temporary directory
-func (t *toc) writeNcxDoc(tempDir string) {
+func (t *toc) writeNcxDoc(fs afero.Fs, tempDir string) {
 	t.ncxXML.Title = t.title
 
 	ncxFileContent, err := xml.MarshalIndent(t.ncxXML, "", "  ")
@@ -219,7 +220,7 @@ func (t *toc) writeNcxDoc(tempDir string) {
 	ncxFileContent = append(ncxFileContent, "\n"...)
 
 	ncxFilePath := filepath.Join(tempDir, contentFolderName, tocNcxFilename)
-	if err := ioutil.WriteFile(ncxFilePath, []byte(ncxFileContent), filePermissions); err != nil {
+	if err := afero.WriteFile(fs, ncxFilePath, []byte(ncxFileContent), filePermissions); err != nil {
 		panic(fmt.Sprintf("Error writing EPUB v2 TOC file: %s", err))
 	}
 }

@@ -3,7 +3,8 @@ package epub
 import (
 	"encoding/xml"
 	"fmt"
-	"io/ioutil"
+
+	"github.com/spf13/afero"
 )
 
 const (
@@ -107,7 +108,7 @@ func (x *xhtml) Title() string {
 }
 
 // Write the XHTML file to the specified path
-func (x *xhtml) write(xhtmlFilePath string) {
+func (x *xhtml) write(fs afero.Fs, xhtmlFilePath string) {
 	xhtmlFileContent, err := xml.MarshalIndent(x.xml, "", "  ")
 	if err != nil {
 		panic(fmt.Sprintf(
@@ -124,7 +125,7 @@ func (x *xhtml) write(xhtmlFilePath string) {
 	// It's generally nice to have files end with a newline
 	xhtmlFileContent = append(xhtmlFileContent, "\n"...)
 
-	if err := ioutil.WriteFile(xhtmlFilePath, []byte(xhtmlFileContent), filePermissions); err != nil {
+	if err := afero.WriteFile(fs, xhtmlFilePath, []byte(xhtmlFileContent), filePermissions); err != nil {
 		panic(fmt.Sprintf("Error writing XHTML file: %s", err))
 	}
 }

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/afero"
 )
 
 const (
@@ -88,13 +90,64 @@ const (
 	testTitleTemplate   = `<dc:title>%s</dc:title>`
 )
 
+func getFs() afero.Fs {
+	fsFlag := os.Getenv("TESTFS")
+
+	switch fsFlag {
+	case "OS":
+		return afero.NewOsFs()
+	case "MEM":
+		fs := afero.NewMemMapFs()
+		copyTestData(fs)
+		return fs
+	}
+
+	return afero.NewOsFs()
+}
+
+func copyTestData(fs afero.Fs) {
+	testFiles := []string{
+		testCoverCSSSource,
+		testImageFromFileSource,
+		testFontFromFileSource,
+	}
+
+	for _, filename := range testFiles {
+		in, err := os.Open(filename)
+		if err != nil {
+			panic(fmt.Sprintf("Failed to copy test data from %s: %s", filename, err.Error()))
+		}
+		defer in.Close()
+
+		out, err := fs.Create(filename)
+		if err != nil {
+			panic(fmt.Sprintf("Failed to copy test data to %s: %s", filename, err.Error()))
+		}
+		defer func() {
+			err := out.Close()
+			if err != nil {
+				panic(fmt.Sprintf("Failed to close output testdata file %s: %s", filename, err.Error()))
+			}
+		}()
+
+		if _, err = io.Copy(out, in); err != nil {
+			panic(fmt.Sprintf("io.Copy failed to copy testdata for %s: %s", filename, err.Error()))
+		}
+
+		err = out.Sync()
+		if err != nil {
+			panic(fmt.Sprintf("Failed to sync written file %s: %s", filename, err.Error()))
+		}
+	}
+}
+
 func TestEpubWrite(t *testing.T) {
-	e := NewEpub(testEpubTitle)
+	e := NewEpubWithFs(testEpubTitle, getFs())
 
 	tempDir := writeAndExtractEpub(t, e, testEpubFilename)
 
 	// Check the contents of the mimetype file
-	contents, err := ioutil.ReadFile(filepath.Join(tempDir, mimetypeFilename))
+	contents, err := afero.ReadFile(e.fs, filepath.Join(tempDir, mimetypeFilename))
 	if err != nil {
 		t.Errorf("Unexpected error reading mimetype file: %s", err)
 	}
@@ -108,7 +161,7 @@ func TestEpubWrite(t *testing.T) {
 	}
 
 	// Check the contents of the container file
-	contents, err = ioutil.ReadFile(filepath.Join(tempDir, metaInfFolderName, containerFilename))
+	contents, err = afero.ReadFile(e.fs, filepath.Join(tempDir, metaInfFolderName, containerFilename))
 	if err != nil {
 		t.Errorf("Unexpected error reading container file: %s", err)
 	}
@@ -122,7 +175,7 @@ func TestEpubWrite(t *testing.T) {
 	}
 
 	// Check the contents of the package file
-	contents, err = ioutil.ReadFile(filepath.Join(tempDir, contentFolderName, pkgFilename))
+	contents, err = afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, pkgFilename))
 	if err != nil {
 		t.Errorf("Unexpected error reading package file: %s", err)
 	}
@@ -137,11 +190,11 @@ func TestEpubWrite(t *testing.T) {
 			testPkgContents)
 	}
 
-	cleanup(testEpubFilename, tempDir)
+	cleanup(e.fs, testEpubFilename, tempDir)
 }
 
 func TestAddCSS(t *testing.T) {
-	e := NewEpub(testEpubTitle)
+	e := NewEpubWithFs(testEpubTitle, getFs())
 	testCSS1Path, err := e.AddCSS(testCoverCSSSource, testCoverCSSFilename)
 	if err != nil {
 		t.Errorf("Error adding CSS: %s", err)
@@ -161,26 +214,12 @@ func TestAddCSS(t *testing.T) {
 	tempDir := writeAndExtractEpub(t, e, testEpubFilename)
 
 	// The CSS file path is relative to the XHTML folder
-	contents, err := ioutil.ReadFile(filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testCSS1Path))
+	contents, err := afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testCSS1Path))
 	if err != nil {
 		t.Errorf("Unexpected error reading CSS file: %s", err)
 	}
 
-	testCSSContents, err := ioutil.ReadFile(testCoverCSSSource)
-	if err != nil {
-		t.Errorf("Unexpected error reading CSS file: %s", err)
-	}
-
-	if trimAllSpace(string(contents)) != trimAllSpace(string(testCSSContents)) {
-		t.Errorf(
-			"CSS file contents don't match\n"+
-				"Got: %s\n"+
-				"Expected: %s",
-			contents,
-			testCSSContents)
-	}
-
-	contents, err = ioutil.ReadFile(filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testCSS2Path))
+	testCSSContents, err := afero.ReadFile(e.fs, testCoverCSSSource)
 	if err != nil {
 		t.Errorf("Unexpected error reading CSS file: %s", err)
 	}
@@ -194,7 +233,21 @@ func TestAddCSS(t *testing.T) {
 			testCSSContents)
 	}
 
-	contents, err = ioutil.ReadFile(filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testSectionPath))
+	contents, err = afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testCSS2Path))
+	if err != nil {
+		t.Errorf("Unexpected error reading CSS file: %s", err)
+	}
+
+	if trimAllSpace(string(contents)) != trimAllSpace(string(testCSSContents)) {
+		t.Errorf(
+			"CSS file contents don't match\n"+
+				"Got: %s\n"+
+				"Expected: %s",
+			contents,
+			testCSSContents)
+	}
+
+	contents, err = afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testSectionPath))
 	if err != nil {
 		t.Errorf("Unexpected error reading section file: %s", err)
 	}
@@ -209,11 +262,11 @@ func TestAddCSS(t *testing.T) {
 			testCSSLinkElement)
 	}
 
-	cleanup(testEpubFilename, tempDir)
+	cleanup(e.fs, testEpubFilename, tempDir)
 }
 
 func TestAddFont(t *testing.T) {
-	e := NewEpub(testEpubTitle)
+	e := NewEpubWithFs(testEpubTitle, getFs())
 	testFontFromFilePath, err := e.AddFont(testFontFromFileSource, "")
 	if err != nil {
 		t.Errorf("Error adding font: %s", err)
@@ -222,12 +275,12 @@ func TestAddFont(t *testing.T) {
 	tempDir := writeAndExtractEpub(t, e, testEpubFilename)
 
 	// The font path is relative to the XHTML folder
-	contents, err := ioutil.ReadFile(filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testFontFromFilePath))
+	contents, err := afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testFontFromFilePath))
 	if err != nil {
 		t.Errorf("Unexpected error reading font file from EPUB: %s", err)
 	}
 
-	testFontContents, err := ioutil.ReadFile(testFontFromFileSource)
+	testFontContents, err := afero.ReadFile(e.fs, testFontFromFileSource)
 	if err != nil {
 		t.Errorf("Unexpected error reading testdata font file: %s", err)
 	}
@@ -235,11 +288,11 @@ func TestAddFont(t *testing.T) {
 		t.Errorf("Font file contents don't match")
 	}
 
-	cleanup(testEpubFilename, tempDir)
+	cleanup(e.fs, testEpubFilename, tempDir)
 }
 
 func TestAddImage(t *testing.T) {
-	e := NewEpub(testEpubTitle)
+	e := NewEpubWithFs(testEpubTitle, getFs())
 	testImageFromFilePath, err := e.AddImage(testImageFromFileSource, testImageFromFileFilename)
 	if err != nil {
 		t.Errorf("Error adding image: %s", err)
@@ -253,12 +306,12 @@ func TestAddImage(t *testing.T) {
 	tempDir := writeAndExtractEpub(t, e, testEpubFilename)
 
 	// The image path is relative to the XHTML folder
-	contents, err := ioutil.ReadFile(filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testImageFromFilePath))
+	contents, err := afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testImageFromFilePath))
 	if err != nil {
 		t.Errorf("Unexpected error reading image file from EPUB: %s", err)
 	}
 
-	testImageContents, err := ioutil.ReadFile(testImageFromFileSource)
+	testImageContents, err := afero.ReadFile(e.fs, testImageFromFileSource)
 	if err != nil {
 		t.Errorf("Unexpected error reading testdata image file: %s", err)
 	}
@@ -266,7 +319,7 @@ func TestAddImage(t *testing.T) {
 		t.Errorf("Image file contents don't match")
 	}
 
-	contents, err = ioutil.ReadFile(filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testImageFromURLPath))
+	contents, err = afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testImageFromURLPath))
 	if err != nil {
 		t.Errorf("Unexpected error reading image file from EPUB: %s", err)
 	}
@@ -275,7 +328,7 @@ func TestAddImage(t *testing.T) {
 	if err != nil {
 		t.Errorf("Unexpected error response from test image URL: %s", err)
 	}
-	testImageContents, err = ioutil.ReadAll(resp.Body)
+	testImageContents, err = afero.ReadAll(resp.Body)
 	if err != nil {
 		t.Errorf("Unexpected error reading test image file from URL: %s", err)
 	}
@@ -283,11 +336,11 @@ func TestAddImage(t *testing.T) {
 		t.Errorf("Image file contents don't match")
 	}
 
-	cleanup(testEpubFilename, tempDir)
+	cleanup(e.fs, testEpubFilename, tempDir)
 }
 
 func TestAddSection(t *testing.T) {
-	e := NewEpub(testEpubTitle)
+	e := NewEpubWithFs(testEpubTitle, getFs())
 	testSection1Path, err := e.AddSection(testSectionBody, testSectionTitle, testSectionFilename, "")
 	if err != nil {
 		t.Errorf("Error adding section: %s", err)
@@ -300,7 +353,7 @@ func TestAddSection(t *testing.T) {
 
 	tempDir := writeAndExtractEpub(t, e, testEpubFilename)
 
-	contents, err := ioutil.ReadFile(filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testSection1Path))
+	contents, err := afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testSection1Path))
 	if err != nil {
 		t.Errorf("Unexpected error reading section file: %s", err)
 	}
@@ -315,7 +368,7 @@ func TestAddSection(t *testing.T) {
 			testSectionContents)
 	}
 
-	contents, err = ioutil.ReadFile(filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testSection2Path))
+	contents, err = afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, xhtmlFolderName, testSection2Path))
 	if err != nil {
 		t.Errorf("Unexpected error reading section file: %s", err)
 	}
@@ -329,11 +382,11 @@ func TestAddSection(t *testing.T) {
 			testSectionContents)
 	}
 
-	cleanup(testEpubFilename, tempDir)
+	cleanup(e.fs, testEpubFilename, tempDir)
 }
 
 func TestEpubAuthor(t *testing.T) {
-	e := NewEpub(testEpubTitle)
+	e := NewEpubWithFs(testEpubTitle, getFs())
 	e.SetAuthor(testEpubAuthor)
 
 	if e.Author() != testEpubAuthor {
@@ -347,7 +400,7 @@ func TestEpubAuthor(t *testing.T) {
 
 	tempDir := writeAndExtractEpub(t, e, testEpubFilename)
 
-	contents, err := ioutil.ReadFile(filepath.Join(tempDir, contentFolderName, pkgFilename))
+	contents, err := afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, pkgFilename))
 	if err != nil {
 		t.Errorf("Unexpected error reading package file: %s", err)
 	}
@@ -362,11 +415,11 @@ func TestEpubAuthor(t *testing.T) {
 			testAuthorElement)
 	}
 
-	cleanup(testEpubFilename, tempDir)
+	cleanup(e.fs, testEpubFilename, tempDir)
 }
 
 func TestEpubLang(t *testing.T) {
-	e := NewEpub(testEpubTitle)
+	e := NewEpubWithFs(testEpubTitle, getFs())
 	e.SetLang(testEpubLang)
 
 	if e.Lang() != testEpubLang {
@@ -380,7 +433,7 @@ func TestEpubLang(t *testing.T) {
 
 	tempDir := writeAndExtractEpub(t, e, testEpubFilename)
 
-	contents, err := ioutil.ReadFile(filepath.Join(tempDir, contentFolderName, pkgFilename))
+	contents, err := afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, pkgFilename))
 	if err != nil {
 		t.Errorf("Unexpected error reading package file: %s", err)
 	}
@@ -395,11 +448,11 @@ func TestEpubLang(t *testing.T) {
 			testLangElement)
 	}
 
-	cleanup(testEpubFilename, tempDir)
+	cleanup(e.fs, testEpubFilename, tempDir)
 }
 
 func TestEpubPpd(t *testing.T) {
-	e := NewEpub(testEpubTitle)
+	e := NewEpubWithFs(testEpubTitle, getFs())
 	e.SetPpd(testEpubPpd)
 
 	if e.Ppd() != testEpubPpd {
@@ -413,7 +466,7 @@ func TestEpubPpd(t *testing.T) {
 
 	tempDir := writeAndExtractEpub(t, e, testEpubFilename)
 
-	contents, err := ioutil.ReadFile(filepath.Join(tempDir, contentFolderName, pkgFilename))
+	contents, err := afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, pkgFilename))
 	if err != nil {
 		t.Errorf("Unexpected error reading package file: %s", err)
 	}
@@ -428,12 +481,12 @@ func TestEpubPpd(t *testing.T) {
 			testPpdElement)
 	}
 
-	cleanup(testEpubFilename, tempDir)
+	cleanup(e.fs, testEpubFilename, tempDir)
 }
 
 func TestEpubTitle(t *testing.T) {
 	// First, test the title we provide when creating the epub
-	e := NewEpub(testEpubTitle)
+	e := NewEpubWithFs(testEpubTitle, getFs())
 	if e.Title() != testEpubTitle {
 		t.Errorf(
 			"Title doesn't match\n"+
@@ -445,7 +498,7 @@ func TestEpubTitle(t *testing.T) {
 
 	tempDir := writeAndExtractEpub(t, e, testEpubFilename)
 
-	contents, err := ioutil.ReadFile(filepath.Join(tempDir, contentFolderName, pkgFilename))
+	contents, err := afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, pkgFilename))
 	if err != nil {
 		t.Errorf("Unexpected error reading package file: %s", err)
 	}
@@ -460,7 +513,7 @@ func TestEpubTitle(t *testing.T) {
 			testTitleElement)
 	}
 
-	cleanup(testEpubFilename, tempDir)
+	cleanup(e.fs, testEpubFilename, tempDir)
 
 	// Now test changing the title
 	e.SetTitle(testEpubAuthor)
@@ -476,7 +529,7 @@ func TestEpubTitle(t *testing.T) {
 
 	tempDir = writeAndExtractEpub(t, e, testEpubFilename)
 
-	contents, err = ioutil.ReadFile(filepath.Join(tempDir, contentFolderName, pkgFilename))
+	contents, err = afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, pkgFilename))
 	if err != nil {
 		t.Errorf("Unexpected error reading package file: %s", err)
 	}
@@ -491,11 +544,11 @@ func TestEpubTitle(t *testing.T) {
 			testTitleElement)
 	}
 
-	cleanup(testEpubFilename, tempDir)
+	cleanup(e.fs, testEpubFilename, tempDir)
 }
 
 func TestEpubIdentifier(t *testing.T) {
-	e := NewEpub(testEpubTitle)
+	e := NewEpubWithFs(testEpubTitle, getFs())
 	e.SetIdentifier(testEpubIdentifier)
 
 	if e.Identifier() != testEpubIdentifier {
@@ -509,7 +562,7 @@ func TestEpubIdentifier(t *testing.T) {
 
 	tempDir := writeAndExtractEpub(t, e, testEpubFilename)
 
-	contents, err := ioutil.ReadFile(filepath.Join(tempDir, contentFolderName, pkgFilename))
+	contents, err := afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, pkgFilename))
 	if err != nil {
 		t.Errorf("Unexpected error reading package file: %s", err)
 	}
@@ -524,18 +577,18 @@ func TestEpubIdentifier(t *testing.T) {
 			testIdentifierElement)
 	}
 
-	cleanup(testEpubFilename, tempDir)
+	cleanup(e.fs, testEpubFilename, tempDir)
 }
 
 func TestSetCover(t *testing.T) {
-	e := NewEpub(testEpubTitle)
+	e := NewEpubWithFs(testEpubTitle, getFs())
 	testImagePath, _ := e.AddImage(testImageFromFileSource, testImageFromFileFilename)
 	testCSSPath, _ := e.AddCSS(testCoverCSSSource, testCoverCSSFilename)
 	e.SetCover(testImagePath, testCSSPath)
 
 	tempDir := writeAndExtractEpub(t, e, testEpubFilename)
 
-	contents, err := ioutil.ReadFile(filepath.Join(tempDir, contentFolderName, xhtmlFolderName, defaultCoverXhtmlFilename))
+	contents, err := afero.ReadFile(e.fs, filepath.Join(tempDir, contentFolderName, xhtmlFolderName, defaultCoverXhtmlFilename))
 	if err != nil {
 		t.Errorf("Unexpected error reading cover XHTML file: %s", err)
 	}
@@ -550,11 +603,11 @@ func TestSetCover(t *testing.T) {
 			testCoverContents)
 	}
 
-	cleanup(testEpubFilename, tempDir)
+	cleanup(e.fs, testEpubFilename, tempDir)
 }
 
 func TestEpubValidity(t *testing.T) {
-	e := NewEpub(testEpubTitle)
+	e := NewEpubWithFs(testEpubTitle, getFs())
 	testCSSPath, _ := e.AddCSS(testCoverCSSSource, testCoverCSSFilename)
 	e.AddCSS(testCoverCSSSource, "")
 	e.AddFont(testFontFromFileSource, "")
@@ -572,7 +625,7 @@ func TestEpubValidity(t *testing.T) {
 
 	tempDir := writeAndExtractEpub(t, e, testEpubFilename)
 
-	output, err := validateEpub(t, testEpubFilename)
+	output, err := validateEpub(t, testEpubFilename, e.fs)
 	if err != nil {
 		t.Errorf("EPUB validation failed")
 	}
@@ -581,13 +634,13 @@ func TestEpubValidity(t *testing.T) {
 	fmt.Println(string(output))
 
 	if doCleanup {
-		cleanup(testEpubFilename, tempDir)
+		cleanup(e.fs, testEpubFilename, tempDir)
 	}
 }
 
-func cleanup(epubFilename string, tempDir string) {
-	os.Remove(epubFilename)
-	os.RemoveAll(tempDir)
+func cleanup(fs afero.Fs, epubFilename string, tempDir string) {
+	fs.Remove(epubFilename)
+	fs.RemoveAll(tempDir)
 }
 
 // TrimAllSpace trims all space from each line of the string and removes empty
@@ -605,9 +658,9 @@ func trimAllSpace(s string) string {
 }
 
 // UnzipFile unzips a file located at sourceFilePath to the provided destination directory
-func unzipFile(sourceFilePath string, destDirPath string) error {
+func unzipFile(fs afero.Fs, sourceFilePath string, destDirPath string) error {
 	// First, make sure the destination exists and is a directory
-	info, err := os.Stat(destDirPath)
+	info, err := fs.Stat(destDirPath)
 	if err != nil {
 		return err
 	}
@@ -615,15 +668,25 @@ func unzipFile(sourceFilePath string, destDirPath string) error {
 		return errors.New("destination is not a directory")
 	}
 
-	r, err := zip.OpenReader(sourceFilePath)
+	f, err := fs.Open(sourceFilePath)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if err := r.Close(); err != nil {
+		if err := f.Close(); err != nil {
 			panic(err)
 		}
 	}()
+
+	sourceInfo, err := fs.Stat(sourceFilePath)
+	if err != nil {
+		return err
+	}
+
+	r, err := zip.NewReader(f, sourceInfo.Size())
+	if err != nil {
+		return err
+	}
 
 	// Iterate through each file in the archive
 	for _, f := range r.File {
@@ -641,10 +704,10 @@ func unzipFile(sourceFilePath string, destDirPath string) error {
 
 		// Create destination subdirectories if necessary
 		destBaseDirPath, _ := filepath.Split(destFilePath)
-		os.MkdirAll(destBaseDirPath, testDirPerm)
+		fs.MkdirAll(destBaseDirPath, testDirPerm)
 
 		// Create the destination file
-		w, err := os.Create(destFilePath)
+		w, err := fs.Create(destFilePath)
 		if err != nil {
 			return err
 		}
@@ -668,7 +731,7 @@ func unzipFile(sourceFilePath string, destDirPath string) error {
 //
 //     wget https://github.com/IDPF/epubcheck/releases/download/v4.0.1/epubcheck-4.0.1.zip
 //     unzip epubcheck-4.0.1.zip
-func validateEpub(t *testing.T, epubFilename string) ([]byte, error) {
+func validateEpub(t *testing.T, epubFilename string, fs afero.Fs) ([]byte, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Error("Error getting working directory")
@@ -688,7 +751,7 @@ func validateEpub(t *testing.T, epubFilename string) ([]byte, error) {
 		} else if strings.HasPrefix(i.Name(), testEpubcheckPrefix) {
 			if i.Mode().IsDir() {
 				pathToEpubcheck = filepath.Join(i.Name(), testEpubcheckJarfile)
-				if _, err := os.Stat(pathToEpubcheck); err == nil {
+				if _, err := fs.Stat(pathToEpubcheck); err == nil {
 					break
 				} else {
 					pathToEpubcheck = ""
@@ -707,7 +770,7 @@ func validateEpub(t *testing.T, epubFilename string) ([]byte, error) {
 }
 
 func writeAndExtractEpub(t *testing.T, e *Epub, epubFilename string) string {
-	tempDir, err := ioutil.TempDir("", tempDirPrefix)
+	tempDir, err := afero.TempDir(e.fs, "", tempDirPrefix)
 	if err != nil {
 		t.Errorf("Unexpected error creating temp dir: %s", err)
 	}
@@ -717,7 +780,7 @@ func writeAndExtractEpub(t *testing.T, e *Epub, epubFilename string) string {
 		t.Errorf("Unexpected error writing EPUB: %s", err)
 	}
 
-	err = unzipFile(epubFilename, tempDir)
+	err = unzipFile(e.fs, epubFilename, tempDir)
 	if err != nil {
 		t.Errorf("Unexpected error extracting EPUB: %s", err)
 	}

@@ -29,14 +29,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/spf13/afero"
 )
 
 // ErrFilenameAlreadyUsed is thrown by AddCSS, AddFont, AddImage, or AddSection
@@ -89,6 +88,7 @@ type Epub struct {
 	css map[string]string
 	// The key is the font filename, the value is the font source
 	fonts      map[string]string
+	fs         afero.Fs
 	identifier string
 	// The key is the image filename, the value is the image source
 	images map[string]string
@@ -127,6 +127,7 @@ func NewEpub(title string) *Epub {
 	}
 	e.css = make(map[string]string)
 	e.fonts = make(map[string]string)
+	e.fs = afero.NewOsFs()
 	e.images = make(map[string]string)
 	e.pkg = newPackage()
 	e.toc = newToc()
@@ -134,6 +135,18 @@ func NewEpub(title string) *Epub {
 	e.SetIdentifier(urnUUIDPrefix + uuid.New().String())
 	e.SetLang(defaultEpubLang)
 	e.SetTitle(title)
+
+	return e
+}
+
+// NewEpubWithFs returns a new Epub which uses an Afero filesystem
+func NewEpubWithFs(title string, fs afero.Fs) *Epub {
+	e := NewEpub(title)
+
+	if fs == nil {
+		fs = afero.NewOsFs()
+	}
+	e.fs = fs
 
 	return e
 }
@@ -150,7 +163,7 @@ func NewEpub(title string) *Epub {
 // than once, ErrFilenameAlreadyUsed will be returned. The internal filename is
 // optional; if no filename is provided, one will be generated.
 func (e *Epub) AddCSS(source string, internalFilename string) (string, error) {
-	return addMedia(source, internalFilename, cssFileFormat, CSSFolderName, e.css)
+	return e.addMedia(source, internalFilename, cssFileFormat, CSSFolderName, e.css)
 }
 
 // AddFont adds a font file to the EPUB and returns a relative path to the font
@@ -165,7 +178,7 @@ func (e *Epub) AddCSS(source string, internalFilename string) (string, error) {
 // than once, ErrFilenameAlreadyUsed will be returned. The internal filename is
 // optional; if no filename is provided, one will be generated.
 func (e *Epub) AddFont(source string, internalFilename string) (string, error) {
-	return addMedia(source, internalFilename, fontFileFormat, FontFolderName, e.fonts)
+	return e.addMedia(source, internalFilename, fontFileFormat, FontFolderName, e.fonts)
 }
 
 // AddImage adds an image to the EPUB and returns a relative path to the image
@@ -180,7 +193,7 @@ func (e *Epub) AddFont(source string, internalFilename string) (string, error) {
 // than once, ErrFilenameAlreadyUsed will be returned. The internal filename is
 // optional; if no filename is provided, one will be generated.
 func (e *Epub) AddImage(source string, imageFilename string) (string, error) {
-	return addMedia(source, imageFilename, imageFileFormat, ImageFolderName, e.images)
+	return e.addMedia(source, imageFilename, imageFileFormat, ImageFolderName, e.images)
 }
 
 // AddSection adds a new section (chapter, etc) to the EPUB and returns a
@@ -283,7 +296,7 @@ func (e *Epub) SetCover(internalImagePath string, internalCSSPath string) {
 		delete(e.css, e.cover.cssFilename)
 
 		if e.cover.cssTempFile != "" {
-			os.Remove(e.cover.cssTempFile)
+			e.fs.Remove(e.cover.cssTempFile)
 		}
 	}
 
@@ -292,7 +305,7 @@ func (e *Epub) SetCover(internalImagePath string, internalCSSPath string) {
 	// Use default cover stylesheet if one isn't provided
 	if internalCSSPath == "" {
 		// Create a temporary file to hold the default cover CSS
-		tempFile, err := ioutil.TempFile("", tempDirPrefix)
+		tempFile, err := afero.TempFile(e.fs, "", tempDirPrefix)
 		if err != nil {
 			panic(fmt.Sprintf("Error creating temp file: %s", err))
 		}
@@ -379,9 +392,9 @@ func (e *Epub) Title() string {
 
 // Add a media file to the EPUB and return the path relative to the EPUB section
 // files
-func addMedia(source string, internalFilename string, mediaFileFormat string, mediaFolderName string, mediaMap map[string]string) (string, error) {
+func (e *Epub) addMedia(source string, internalFilename string, mediaFileFormat string, mediaFolderName string, mediaMap map[string]string) (string, error) {
 	// Make sure the source file is valid before proceeding
-	if isFileSourceValid(source) == false {
+	if e.isFileSourceValid(source) == false {
 		return "", ErrRetrievingFile
 	}
 
@@ -411,7 +424,7 @@ func addMedia(source string, internalFilename string, mediaFileFormat string, me
 	), nil
 }
 
-func isFileSourceValid(source string) bool {
+func (e *Epub) isFileSourceValid(source string) bool {
 	u, err := url.Parse(source)
 	if err != nil {
 		return false
@@ -429,7 +442,7 @@ func isFileSourceValid(source string) bool {
 
 		// Otherwise, assume it's a local file
 	} else {
-		r, err = os.Open(source)
+		r, err = e.fs.Open(source)
 	}
 	if err != nil {
 		return false

@@ -3,9 +3,10 @@ package epub
 import (
 	"encoding/xml"
 	"fmt"
-	"io/ioutil"
 	"path/filepath"
 	"time"
+
+	"github.com/spf13/afero"
 )
 
 const (
@@ -234,7 +235,7 @@ func updateMeta(a []pkgMeta, m *pkgMeta) []pkgMeta {
 }
 
 // Write the package file to the temporary directory
-func (p *pkg) write(tempDir string) {
+func (p *pkg) write(fs afero.Fs, tempDir string) {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 	p.setModified(now)
 
@@ -253,7 +254,7 @@ func (p *pkg) write(tempDir string) {
 	// It's generally nice to have files end with a newline
 	pkgFileContent = append(pkgFileContent, "\n"...)
 
-	if err := ioutil.WriteFile(pkgFilePath, []byte(pkgFileContent), filePermissions); err != nil {
+	if err := afero.WriteFile(fs, pkgFilePath, []byte(pkgFileContent), filePermissions); err != nil {
 		panic(fmt.Sprintf("Error writing package file: %s", err))
 	}
 }
